@@ -1,0 +1,1 @@
+svn log -r0:HEAD -q <URL> > svn.log
