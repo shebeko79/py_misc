@@ -48,9 +48,9 @@ class MyApp(QMainWindow):
 
 
 class MainWidget(QWidget):
-    def __init__(self, parent):
-        super(MainWidget, self).__init__(parent)
-        self.parent = parent
+    def __init__(self, app):
+        super(MainWidget, self).__init__(app)
+        self.app = app
         self.directory = None
         self.classes = []
         self.images = []
@@ -65,7 +65,7 @@ class MainWidget(QWidget):
 
 
     def initUI(self):
-        self.label_img = ImageWidget(self.parent)
+        self.label_img = ImageWidget(self)
 
         self.prevButton = QPushButton('Prev', self)
         self.prevButton.clicked.connect(self.prevImage)
@@ -118,8 +118,8 @@ class MainWidget(QWidget):
 
     def setCurrentImage(self):
         if self.cur_image < 0 or self.cur_image >= len(self.images):
-            self.parent.fileName.setText("")
-            self.parent.progress.setText("")
+            self.app.fileName.setText("")
+            self.app.progress.setText("")
             self.label_img.resetResult()
             return
 
@@ -129,24 +129,11 @@ class MainWidget(QWidget):
         img_file = os.path.join(self.directory, "images/"+img_file)
         txt_file = os.path.join(self.directory, "labels/"+filename+".txt")
 
-        self.parent.fileName.setText(filename)
-        self.parent.progress.setText(str(self.cur_image)+'/'+str(len(self.images)))
+        self.app.fileName.setText(filename)
+        self.app.progress.setText(str(self.cur_image)+'/'+str(len(self.images)))
 
-        self.label_img.setPixmap(img_file)
-        self.label_img.update()
-        self.parent.fitSize()
-
-    def writeResults(self, res:list):
-        if self.parent.fileName.text() != 'Ready':
-            W, H = self.label_img.getRatio()
-            if not res:
-                open(self.currentImg[:-4]+'.txt', 'a', encoding='utf8').close()
-            for i, elements in enumerate(res):  # box : (lx, ly, rx, ry, idx)
-                lx, ly, rx, ry, idx = elements
-                # yolo : (idx center_x_ratio, center_y_ratio, width_ratio, height_ratio)
-                yolo_format = [idx, (lx+rx)/2/W, (ly+ry)/2/H, (rx-lx)/W, (ry-ly)/H]
-                with open(self.currentImg[:-4]+'.txt', 'a', encoding='utf8') as resultFile:
-                    resultFile.write(' '.join([str(x) for x in yolo_format])+'\n')
+        self.label_img.init(img_file, txt_file)
+        self.app.fitSize()
 
     def initImagesDirectory(self):
         if self.directory is None or not os.path.isdir(self.directory):
@@ -229,23 +216,23 @@ class MainWidget(QWidget):
             self.setNextImage()
         elif e.key() == Qt.Key_Q:
             self.label_img.resetResult()
-            self.label_img.pixmap = self.label_img.drawResultBox()
-            self.label_img.update()
 
 
 class ImageWidget(QWidget):
-    def __init__(self, parent):
-        super(ImageWidget, self).__init__(parent)
-        self.parent = parent
+    def __init__(self, main_widget):
+        super(ImageWidget, self).__init__(main_widget.app)
+        self.main_widget = main_widget
+        self.app = main_widget.app
         self.results = []
         self.setMouseTracking(True)
         self.screen_height = QDesktopWidget().screenGeometry().height()
         self.last_idx = 0
+        self.txt_file = ""
 
         self.initUI()
 
     def initUI(self):
-        self.pixmap = QPixmap('start.png')
+        self.pixmap = QPixmap()
         self.label_img = QLabel()
         self.label_img.setObjectName("image")
         self.pixmapOriginal = QPixmap.copy(self.pixmap)
@@ -254,6 +241,31 @@ class ImageWidget(QWidget):
         self.lastPoint = QPoint()
         hbox = QHBoxLayout(self.label_img)
         self.setLayout(hbox)
+
+    def init(self, img_file, txt_file):
+        self.setPixmap(img_file)
+        self.txt_file = txt_file
+        self.loadBoxes()
+        self.pixmap = self.drawResultBox()
+
+        self.update()
+
+
+
+    def setPixmap(self, image_fn):
+        self.pixmap = QPixmap(image_fn)
+        self.W, self.H = self.pixmap.width(), self.pixmap.height()
+
+        if self.H > self.screen_height * 0.8:
+            resize_ratio = (self.screen_height * 0.8) / self.H
+            self.W = round(self.W * resize_ratio)
+            self.H = round(self.H * resize_ratio)
+            self.pixmap = QPixmap.scaled(self.pixmap, self.W, self.H,
+                                         transformMode=Qt.SmoothTransformation)
+
+        self.app.imageSize.setText('{}x{}'.format(self.W, self.H))
+        self.setFixedSize(self.W, self.H)
+        self.pixmapOriginal = QPixmap.copy(self.pixmap)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -275,7 +287,7 @@ class ImageWidget(QWidget):
                     break
 
     def mouseMoveEvent(self, event):
-        self.parent.cursorPos.setText('({}, {})'
+        self.app.cursorPos.setText('({}, {})'
                                       .format(event.pos().x(), event.pos().y()))
         if event.buttons() and Qt.LeftButton and self.drawing:
             self.pixmap = QPixmap.copy(self.prev_pixmap)
@@ -295,7 +307,7 @@ class ImageWidget(QWidget):
             w, h = abs(p1_x - p2_x), abs(p1_y - p2_y)
             if (p1_x, p1_y) != (p2_x, p2_y):
                 if self.results and (len(self.results[-1]) == 4):
-                    self.showPopupOk('warning messege',
+                    self.showPopupOk('warning message',
                                      'Please mark the box you drew.')
                     self.pixmap = self.drawResultBox()
                     self.update()
@@ -323,39 +335,20 @@ class ImageWidget(QWidget):
             painter.drawRect(lx, ly, rx - lx, ry - ly)
             if len(box) == 5:
                 painter.setPen(QPen(Qt.blue, 2, Qt.SolidLine))
-                painter.drawText(lx, ly + 15, self.key_config[box[-1]])
+                painter.drawText(lx, ly + 15, self.main_widget.classes[box[-1]])
                 painter.setPen(QPen(Qt.red, 2, Qt.SolidLine))
         return res
 
-    def setPixmap(self, image_fn):
-        self.pixmap = QPixmap(image_fn)
-        self.W, self.H = self.pixmap.width(), self.pixmap.height()
-
-        if self.H > self.screen_height * 0.8:
-            resize_ratio = (self.screen_height * 0.8) / self.H
-            self.W = round(self.W * resize_ratio)
-            self.H = round(self.H * resize_ratio)
-            self.pixmap = QPixmap.scaled(self.pixmap, self.W, self.H,
-                                         transformMode=Qt.SmoothTransformation)
-
-        self.parent.imageSize.setText('{}x{}'.format(self.W, self.H))
-        self.setFixedSize(self.W, self.H)
-        self.pixmapOriginal = QPixmap.copy(self.pixmap)
-
     def cancelLast(self):
-        if self.results:
+        if len(self.results)>0:
             self.results.pop()  # pop last
             self.pixmap = self.drawResultBox()
             self.update()
 
-    def getRatio(self):
-        return self.W, self.H
-
-    def getResult(self):
-        return self.results
-
     def resetResult(self):
         self.results = []
+        self.pixmap = self.drawResultBox()
+        self.update()
 
     def markBox(self, idx):
         self.last_idx = idx
@@ -368,6 +361,40 @@ class ImageWidget(QWidget):
                 raise ValueError('invalid results')
             self.pixmap = self.drawResultBox()
             self.update()
+
+    def loadBoxes(self):
+        self.results = []
+
+        if self.txt_file == '' or not os.path.exists(self.txt_file):
+            return
+
+        lines = []
+
+        with open(self.txt_file, "r") as file:
+            lines = file.read().splitlines()
+            for l in lines:
+                vls = l.split()
+                if len(vls) == 5:
+                    idx = int(vls[0])
+                    cx = float(vls[1])
+                    cy = float(vls[2])
+                    w = float(vls[3])
+                    h = float(vls[4])
+
+                    vls = [int((cx-w/2)*self.W), int((cy-h/2)*self.H), int((cx+w/2)*self.W), int((cy+h/2)*self.H), idx]
+                    self.results.append(vls)
+
+    def saveBoxes(self):
+        if self.txt_file == '':
+            return
+
+        with open(self.file_name, 'w') as file:
+            for elements in self.results:
+                lx, ly, rx, ry, idx = elements
+                cx = (lx + rx) / 2 / self.W
+                cy = (ly + ry) / 2 / self.H
+                s = f"{idx} {cx} {cy} {(rx - lx) / self.W} {(ry - ly) / self.H}\n"
+                file.write(s)
 
 
 if __name__ == '__main__':
