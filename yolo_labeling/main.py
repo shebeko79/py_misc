@@ -12,6 +12,7 @@ from PyQt5.QtCore import QRect, QPoint
 class MyApp(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.mainWidget = None
         self.initUI()
 
     def initUI(self):
@@ -20,9 +21,9 @@ class MyApp(QMainWindow):
         self.imageSize = QLabel('      ')
         self.progress = QLabel('                 ')
 
-        mainWidget = MainWidget(self)
+        self.mainWidget = MainWidget(self)
 
-        self.setCentralWidget(mainWidget)
+        self.setCentralWidget(self.mainWidget)
         statusbar = self.statusBar()
         self.setStatusBar(statusbar)
 
@@ -42,6 +43,11 @@ class MyApp(QMainWindow):
         
     def fitSize(self):
         self.setFixedSize(self.layout().sizeHint())
+
+    def closeEvent(self, ev):
+        if self.mainWidget and self.mainWidget.label_img:
+            self.mainWidget.label_img.saveModifiedBoxes()
+        ev.accept()
 
 
 class MainWidget(QWidget):
@@ -281,6 +287,12 @@ class MainWidget(QWidget):
 
     def keyPressEvent(self, e):
         k = e.key()
+
+        if self.label_img.drawing:
+            if e.key() == Qt.Key_Escape:
+                self.label_img.resetDrawing()
+            return
+
         if 0x30 <= e.key() <= 0x39:
             idx = e.key()-0x30
             if idx < self.classesCombo.count():
@@ -370,9 +382,23 @@ class ImageWidget(QWidget):
                 lx, ly, rx, ry = box[:4]
                 if lx <= x <= rx and ly <= y <= ry:
                     self.results.pop(i)
+                    self.modified = True
                     self.pixmap = self.drawResultBox()
                     self.update()
                     break
+
+    def constrains(self, x, y):
+        if x < 0:
+            x = 0
+        elif x >= self.pixmap.width():
+            x = self.pixmap.width() - 1
+
+        if y < 0:
+            y = 0
+        elif y >= self.pixmap.height():
+            y = self.pixmap.height() - 1
+
+        return [x, y]
 
     def mouseMoveEvent(self, event):
         self.app.cursorPos.setText(f'({event.pos().x()}, {event.pos().y()})')
@@ -382,6 +408,7 @@ class ImageWidget(QWidget):
             painter.setPen(QPen(Qt.red, 2, Qt.SolidLine))
             p1_x, p1_y = self.lastPoint.x(), self.lastPoint.y()
             p2_x, p2_y = event.pos().x(), event.pos().y()
+            p2_x, p2_y = self.constrains(p2_x, p2_y)
             painter.drawRect(min(p1_x, p2_x), min(p1_y, p2_y),
                              abs(p1_x - p2_x), abs(p1_y - p2_y))
             self.update()
@@ -390,20 +417,33 @@ class ImageWidget(QWidget):
         if event.button() != Qt.LeftButton:
             return
 
-        p1_x, p1_y = self.lastPoint.x(), self.lastPoint.y()
-        p2_x, p2_y = event.pos().x(), event.pos().y()
-        lx, ly = min(p1_x, p2_x), min(p1_y, p2_y)
-        w, h = abs(p1_x - p2_x), abs(p1_y - p2_y)
-        if (p1_x, p1_y) == (p2_x, p2_y):
+        if not self.drawing:
             return
 
         self.drawing = False
-        self.results.append([lx, ly, lx + w, ly + h, 0])
+
+        p1_x, p1_y = self.lastPoint.x(), self.lastPoint.y()
+        p2_x, p2_y = event.pos().x(), event.pos().y()
+        p2_x, p2_y = self.constrains(p2_x, p2_y)
+
+        if (p1_x, p1_y) == (p2_x, p2_y):
+            return
+
+        l1x, l1y = min(p1_x, p2_x), min(p1_y, p2_y)
+        l2x, l2y = max(p1_x, p2_x), max(p1_y, p2_y)
+
+        self.results.append([l1x, l1y, l2x, l2y, 0])
 
         sel_idx = self.main_widget.classesCombo.currentIndex()
         if sel_idx < 0:
             sel_idx = 0
         self.markBox(sel_idx)
+
+    def resetDrawing(self):
+        self.drawing = False
+        self.pixmap = self.drawResultBox()
+        self.update()
+
 
     def drawResultBox(self):
         res = QPixmap.copy(self.pixmapOriginal)
@@ -422,7 +462,7 @@ class ImageWidget(QWidget):
         return res
 
     def removeLast(self):
-        if len(self.results)>0:
+        if len(self.results) > 0:
             self.results.pop()  # pop last
             self.modified = True
             self.pixmap = self.drawResultBox()
