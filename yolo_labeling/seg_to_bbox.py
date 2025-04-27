@@ -21,7 +21,7 @@ def process_file(txt_file):
         lines = file.read().splitlines()
         for l in lines:
             vls = l.split()
-            if len(vls) > 1:
+            if len(vls) >= 5:
                 idx = int(vls[0])
 
                 minx = miny = float('inf')
