@@ -1,0 +1,17 @@
+path: /content/yolo/data
+train: train/images
+val: validation/images
+nc: 12
+names:
+- door
+- window
+- doorway
+- table
+- chair
+- bed
+- monitor
+- sink
+- toilet
+- person
+- cat
+- dog

@@ -1,0 +1,14 @@
+create_yaml.py
+train_val_split.py --datapath C:\src\py\detection\room\
+
+
+!unzip -q /content/yolo.zip
+!pip install ultralytics
+!yolo detect train data=/content/yolo/room.yaml model=yolo11n.pt epochs=100 imgsz=320
+
+
+camera.py
+convert.py
+
+docker run -it --rm -v C:/src/py/maixcam-model-conversion/workspace:/app/workspace maixcam
+./convert.sh
